@@ -7,6 +7,18 @@ else
     echo "No fck-nat configuration at /etc/fck-nat.conf"
 fi
 
+if test -n "$eip_id"; then
+  echo "Found eip_id configuration, attaching $eip_id..."
+
+  aws_region="$(/opt/aws/bin/ec2-metadata -z | cut -f2 -d' ' | sed 's/.$//')"
+  instance_id="$(/opt/aws/bin/ec2-metadata -i | cut -f2 -d' ')"
+
+  aws ec2 associate-address \
+    --region "$aws_region" \
+    --instance-id "$instance_id" \
+    --allocation-id "$eip_id"
+fi
+
 if test -n "$eni_id"; then
     echo "Found eni_id configuration, attaching $eni_id..."
 
@@ -56,5 +68,39 @@ iptables -t nat -F
 
 echo "Adding NAT rule..."
 iptables -t nat -A POSTROUTING -o "$nat_interface" -j MASQUERADE -m comment --comment "NAT routing rule installed by fck-nat"
+
+echo "Adding DNS redirect rules..."
+if test -n "$eni_id"; then
+  iptables -t nat -A PREROUTING -i eth1 -p udp --dport 53 -j REDIRECT --to-port 53
+  iptables -t nat -A PREROUTING -i eth1 -p tcp --dport 53 -j REDIRECT --to-port 53
+else
+  #Access out DNS servers
+  iptables -t nat -A PREROUTING -p tcp --dport 53 -d 169.254.169.253/32 -j ACCEPT
+  iptables -t nat -A PREROUTING -p udp --dport 53 -d 169.254.169.253/32 -j ACCEPT
+  iptables -t nat -A PREROUTING -p tcp --dport 53 -d 172.64.36.0/24 -j ACCEPT
+  iptables -t nat -A PREROUTING -p udp --dport 53 -d 172.64.36.0/24 -j ACCEPT
+
+  #Add resolv.conf servers
+  awk '/nameserver/ { print "iptables -t nat -A PREROUTING -p udp --dport 53 -d " $2 " -j ACCEPT"; }' /etc/resolv.conf | sh
+  awk '/nameserver/ { print "iptables -t nat -A PREROUTING -p tcp --dport 53 -d " $2 " -j ACCEPT"; }' /etc/resolv.conf | sh
+
+  #Accept local forwards/redirects
+  iptables -t nat -A PREROUTING -p tcp --dport 53 -d 172.16.0.0/12 -j ACCEPT
+  iptables -t nat -A PREROUTING -p udp --dport 53 -d 172.16.0.0/12 -j ACCEPT
+  iptables -t nat -A PREROUTING -p tcp --dport 53 -d 10.0.0.0/8 -j ACCEPT
+  iptables -t nat -A PREROUTING -p udp --dport 53 -d 10.0.0.0/8 -j ACCEPT
+  iptables -t nat -A PREROUTING -p tcp --dport 53 -d 192.168.0.0/16 -j ACCEPT
+  iptables -t nat -A PREROUTING -p udp --dport 53 -d 192.168.0.0/16 -j ACCEPT
+
+  #Redirect from private ips to local unbound
+  iptables -t nat -A PREROUTING -p tcp --dport 53 -s 172.16.0.0/12 -j REDIRECT --to-port 53
+  iptables -t nat -A PREROUTING -p udp --dport 53 -s 172.16.0.0/12 -j REDIRECT --to-port 53
+  iptables -t nat -A PREROUTING -p tcp --dport 53 -s 10.0.0.0/8 -j REDIRECT --to-port 53
+  iptables -t nat -A PREROUTING -p udp --dport 53 -s 10.0.0.0/8 -j REDIRECT --to-port 53
+  iptables -t nat -A PREROUTING -p tcp --dport 53 -s 192.168.0.0/16 -j REDIRECT --to-port 53
+  iptables -t nat -A PREROUTING -p udp --dport 53 -s 192.168.0.0/16 -j REDIRECT --to-port 53
+fi
+
+systemctl restart unbound
 
 echo "Done!"
