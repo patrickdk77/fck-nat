@@ -4,9 +4,9 @@ curl -o /etc/unbound/root.hints https://www.internic.net/domain/named.root
 
 cat << EOM > /etc/unbound/unbound.conf
 server:
-	interface: eth0
-	interface: eth1
-	interface: lo
+	interface: 0.0.0.0
+	interface: ::0
+	interface-automatic: yes
 	port: 53
 	root-hints: "root.hints"
 	#auto-trust-anchor-file: "root.key"
