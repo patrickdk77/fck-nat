@@ -7,39 +7,40 @@ else
     echo "No fck-nat configuration at /etc/fck-nat.conf"
 fi
 
+aws_region="$(/opt/aws/bin/ec2-metadata -z | cut -f2 -d' ' | sed 's/.$//')"
+eth0_mac="$(cat /sys/class/net/eth0/address)"
+token="$(curl -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 300' http://169.254.169.254/latest/api/token)"
+eth0_eni_id="$(curl -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/network/interfaces/macs/$eth0_mac/interface-id)"
+
 if test -n "$eip_id"; then
-  echo "Found eip_id configuration, attaching $eip_id..."
+    echo "Found eip_id configuration, associating $eip_id..."
 
-  aws_region="$(/opt/aws/bin/ec2-metadata -z | cut -f2 -d' ' | sed 's/.$//')"
-  instance_id="$(/opt/aws/bin/ec2-metadata -i | cut -f2 -d' ')"
-
-  aws ec2 associate-address \
-    --region "$aws_region" \
-    --instance-id "$instance_id" \
-    --allocation-id "$eip_id"
+    aws ec2 associate-address \
+        --region "$aws_region" \
+        --allocation-id "$eip_id" \
+        --network-interface-id "$eth0_eni_id" \
+        --allow-reassociation
+    sleep 3
 fi
 
 if test -n "$eni_id"; then
     echo "Found eni_id configuration, attaching $eni_id..."
 
-    aws_region="$(/opt/aws/bin/ec2-metadata -z | cut -f2 -d' ' | sed 's/.$//')"
     instance_id="$(/opt/aws/bin/ec2-metadata -i | cut -f2 -d' ')"
 
-    eth0_mac="$(cat /sys/class/net/eth0/address)"
-    
-    token="$(curl -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 300' http://169.254.169.254/latest/api/token)"
-    eth0_eni_id="$(curl -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/network/interfaces/macs/$eth0_mac/interface-id)"
-    
     aws ec2 modify-network-interface-attribute \
         --region "$aws_region" \
         --network-interface-id "$eth0_eni_id" \
         --no-source-dest-check
 
-    aws ec2 attach-network-interface \
+    while ! aws ec2 attach-network-interface \
         --region "$aws_region" \
         --instance-id "$instance_id" \
         --device-index 1 \
-        --network-interface-id "$eni_id"
+        --network-interface-id "$eni_id"; do
+        echo "Waiting for ENI to attach..."
+        sleep 5
+    done
 
     while ! ip link show dev eth1; do
         echo "Waiting for ENI to come up..."
