@@ -1,8 +1,13 @@
 #!/bin/sh
 
-curl -o /etc/unbound/root.hints https://www.internic.net/domain/named.root
+if test -f "/etc/fck-nat.conf"; then
+    . /etc/fck-nat.conf
+fi
 
-cat << EOM > /etc/unbound/unbound.conf
+if test -n "$allow_dns"; then
+  curl -o /etc/unbound/root.hints https://www.internic.net/domain/named.root
+
+  cat << EOM > /etc/unbound/unbound.conf
 server:
 	interface: 0.0.0.0
 	interface: ::0
@@ -42,8 +47,11 @@ server:
 
 forward-zone:
 	name: "."
-	forward-addr: 172.64.36.1
-	forward-addr: 172.64.36.2
+EOM
+  for dnsip in ${allow_dns}; do
+    echo "        forward-addr: ${dnsip}" >> /etc/unbound/unbound.conf
+  done
+  cat << EOM >> /etc/unbound/unbound.conf
 	forward-first: yes
 
 forward-zone:
@@ -76,9 +84,9 @@ forward-zone:
 
 EOM
 
-
-systemctl enable unbound
-systemctl start unbound
+  systemctl enable unbound
+  systemctl start unbound
+fi
 
 systemctl enable fck-nat
 systemctl start fck-nat

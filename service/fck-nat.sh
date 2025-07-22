@@ -87,7 +87,6 @@ net.ipv4.udp_wmem_min = 8192
 net.ipv4.ip_local_port_range = 10000 64000
 EOM
 
-
 echo "Enabling ip_forward..."
 sysctl -q -w net.ipv4.ip_forward=1
 
@@ -115,45 +114,46 @@ for sship in ${allow_ssh}; do
   iptables -A INPUT -m state --state NEW -s ${sship} -p tcp --dport 22 -j ACCEPT
 done
 
+if test -n "$allow_dns"; then
+  echo "Adding DNS redirect rules..."
+  if test -n "$eni_id"; then
+    iptables -A INPUT -m state --state NEW -i "!$nat_interface" -j ACCEPT
+    iptables -A FORWARD -i "$nat_interface" -o "$nat_interface" -j REJECT
 
-echo "Adding DNS redirect rules..."
-if test -n "$eni_id"; then
-  iptables -A INPUT -m state --state NEW -i "!$nat_interface" -j ACCEPT
-  iptables -A FORWARD -i "$nat_interface" -o "$nat_interface" -j REJECT
+    iptables -t nat -A PREROUTING -i "!$nat_interface" -p udp --dport 53 -j REDIRECT --to-port 53
+    iptables -t nat -A PREROUTING -i "!$nat_interface" -p tcp --dport 53 -j REDIRECT --to-port 53
+  else
+    #Access out DNS servers
+    iptables -t nat -A PREROUTING -p tcp --dport 53 -d 169.254.169.253/32 -j ACCEPT
+    iptables -t nat -A PREROUTING -p udp --dport 53 -d 169.254.169.253/32 -j ACCEPT
+    for dnsip in ${allow_dns}; do
+      iptables -t nat -A PREROUTING -p tcp --dport 53 -d ${dnsip} -j ACCEPT
+      iptables -t nat -A PREROUTING -p udp --dport 53 -d ${dnsip} -j ACCEPT
+    done
 
-  iptables -t nat -A PREROUTING -i "!$nat_interface" -p udp --dport 53 -j REDIRECT --to-port 53
-  iptables -t nat -A PREROUTING -i "!$nat_interface" -p tcp --dport 53 -j REDIRECT --to-port 53
-else
-  #Access out DNS servers
-  iptables -t nat -A PREROUTING -p tcp --dport 53 -d 169.254.169.253/32 -j ACCEPT
-  iptables -t nat -A PREROUTING -p udp --dport 53 -d 169.254.169.253/32 -j ACCEPT
-  for dnsip in ${allow_dns}; do
-    iptables -t nat -A PREROUTING -p tcp --dport 53 -d ${dnsip} -j ACCEPT
-    iptables -t nat -A PREROUTING -p udp --dport 53 -d ${dnsip} -j ACCEPT
-  done
+    #Add resolv.conf servers
+    awk '/nameserver/ { print "iptables -t nat -A PREROUTING -p udp --dport 53 -d " $2 " -j ACCEPT"; }' /etc/resolv.conf | sh
+    awk '/nameserver/ { print "iptables -t nat -A PREROUTING -p tcp --dport 53 -d " $2 " -j ACCEPT"; }' /etc/resolv.conf | sh
 
-  #Add resolv.conf servers
-  awk '/nameserver/ { print "iptables -t nat -A PREROUTING -p udp --dport 53 -d " $2 " -j ACCEPT"; }' /etc/resolv.conf | sh
-  awk '/nameserver/ { print "iptables -t nat -A PREROUTING -p tcp --dport 53 -d " $2 " -j ACCEPT"; }' /etc/resolv.conf | sh
+    #Accept local forwards/redirects
+    iptables -t nat -A PREROUTING -p tcp --dport 53 -d 172.16.0.0/12 -j ACCEPT
+    iptables -t nat -A PREROUTING -p udp --dport 53 -d 172.16.0.0/12 -j ACCEPT
+    iptables -t nat -A PREROUTING -p tcp --dport 53 -d 10.0.0.0/8 -j ACCEPT
+    iptables -t nat -A PREROUTING -p udp --dport 53 -d 10.0.0.0/8 -j ACCEPT
+    iptables -t nat -A PREROUTING -p tcp --dport 53 -d 192.168.0.0/16 -j ACCEPT
+    iptables -t nat -A PREROUTING -p udp --dport 53 -d 192.168.0.0/16 -j ACCEPT
 
-  #Accept local forwards/redirects
-  iptables -t nat -A PREROUTING -p tcp --dport 53 -d 172.16.0.0/12 -j ACCEPT
-  iptables -t nat -A PREROUTING -p udp --dport 53 -d 172.16.0.0/12 -j ACCEPT
-  iptables -t nat -A PREROUTING -p tcp --dport 53 -d 10.0.0.0/8 -j ACCEPT
-  iptables -t nat -A PREROUTING -p udp --dport 53 -d 10.0.0.0/8 -j ACCEPT
-  iptables -t nat -A PREROUTING -p tcp --dport 53 -d 192.168.0.0/16 -j ACCEPT
-  iptables -t nat -A PREROUTING -p udp --dport 53 -d 192.168.0.0/16 -j ACCEPT
-
-  #Redirect from private ips to local unbound
-  iptables -t nat -A PREROUTING -p tcp --dport 53 -s 172.16.0.0/12 -j REDIRECT --to-port 53
-  iptables -t nat -A PREROUTING -p udp --dport 53 -s 172.16.0.0/12 -j REDIRECT --to-port 53
-  iptables -t nat -A PREROUTING -p tcp --dport 53 -s 10.0.0.0/8 -j REDIRECT --to-port 53
-  iptables -t nat -A PREROUTING -p udp --dport 53 -s 10.0.0.0/8 -j REDIRECT --to-port 53
-  iptables -t nat -A PREROUTING -p tcp --dport 53 -s 192.168.0.0/16 -j REDIRECT --to-port 53
-  iptables -t nat -A PREROUTING -p udp --dport 53 -s 192.168.0.0/16 -j REDIRECT --to-port 53
+    #Redirect from private ips to local unbound
+    iptables -t nat -A PREROUTING -p tcp --dport 53 -s 172.16.0.0/12 -j REDIRECT --to-port 53
+    iptables -t nat -A PREROUTING -p udp --dport 53 -s 172.16.0.0/12 -j REDIRECT --to-port 53
+    iptables -t nat -A PREROUTING -p tcp --dport 53 -s 10.0.0.0/8 -j REDIRECT --to-port 53
+    iptables -t nat -A PREROUTING -p udp --dport 53 -s 10.0.0.0/8 -j REDIRECT --to-port 53
+    iptables -t nat -A PREROUTING -p tcp --dport 53 -s 192.168.0.0/16 -j REDIRECT --to-port 53
+    iptables -t nat -A PREROUTING -p udp --dport 53 -s 192.168.0.0/16 -j REDIRECT --to-port 53
+  fi
+  
+  systemctl restart unbound
 fi
-
-systemctl restart unbound
 
 echo "Adjusting conntrack"
 MAXMEM=$(awk '/MemTotal/ { print $2; }' /proc/meminfo)
