@@ -12,7 +12,7 @@ instance_id="$(curl -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254
 aws_region="$(curl -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/placement/region)"
 outbound_mac="$(curl -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/mac)"
 outbound_eni_id="$(curl -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/network/interfaces/macs/$outbound_mac/interface-id)"
-nat_interface=$(ip link show dev "$outbound_eni_id" | head -n 1 | awk '{print $2}' | sed s/://g )
+nat_interface=$(ip link show dev "$outbound_eni_id" | head -n 1 | awk '{gsub(":",""); print $2}' )
 
 if test -n "$eip_id"; then
     echo "Found eip_id configuration, associating $eip_id..."
@@ -56,6 +56,8 @@ elif test -n "$interface"; then
 else
     echo "No eni_id or interface configuration found, using default interface $nat_interface"
 fi
+
+#net_interface=$(ip link show | awk '/^[0-9]+: e/ {gsub(":",""); if($2 != "'$nat_interface'") {printf $2 " ";}} END { print ""; }' )
 
 cat << EOM | sysctl -q -p -
 net.netfilter.nf_conntrack_sctp_timeout_established=1800
@@ -110,17 +112,17 @@ iptables -A INPUT -m state --state NEW -s 127.0.0.0/8 -j ACCEPT
 iptables -P INPUT DROP
 
 for sship in ${allow_ssh}; do
-  iptables -A INPUT -m state --state NEW -s ${sship} -j ACCEPT
+  iptables -A INPUT -m state --state NEW -s ${sship} -p tcp --dport 22 -j ACCEPT
 done
 
 
 echo "Adding DNS redirect rules..."
 if test -n "$eni_id"; then
-  iptables -A INPUT -m state --state NEW -i ! "$nat_interface" -j ACCEPT
+  iptables -A INPUT -m state --state NEW -i "!$nat_interface" -j ACCEPT
   iptables -A FORWARD -i "$nat_interface" -o "$nat_interface" -j REJECT
 
-  iptables -t nat -A PREROUTING -i eth1 -p udp --dport 53 -j REDIRECT --to-port 53
-  iptables -t nat -A PREROUTING -i eth1 -p tcp --dport 53 -j REDIRECT --to-port 53
+  iptables -t nat -A PREROUTING -i "!$nat_interface" -p udp --dport 53 -j REDIRECT --to-port 53
+  iptables -t nat -A PREROUTING -i "!$nat_interface" -p tcp --dport 53 -j REDIRECT --to-port 53
 else
   #Access out DNS servers
   iptables -t nat -A PREROUTING -p tcp --dport 53 -d 169.254.169.253/32 -j ACCEPT
