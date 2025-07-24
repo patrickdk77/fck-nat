@@ -38,12 +38,37 @@ server:
 	hide-identity: yes
 	hide-version: yes
 	qname-minimisation: yes
+        incoming-num-tcp: 100
 	cache-min-ttl: 30
 	cache-max-ttl: 14400
 	prefetch: yes
 	prefetch-key: yes
-	verbosity: 1
-	val-log-level: 1
+	verbosity: 0
+	tls-cert-bundle: /etc/ssl/cert.pem
+        statistics-interval: 0
+        extended-statistics: no
+        statistics-cumulative: no 
+        verbosity:          0
+        do-ip4:             yes
+        do-ip6:             yes
+        do-udp:             yes
+        do-tcp:             yes
+
+        num-threads:        2
+        msg-cache-slabs:    4
+        rrset-cache-slabs:  4
+        infra-cache-slabs:  4
+        key-cache-slabs:    4
+        rrset-cache-size:   128m
+        msg-cache-size:     64m
+        key-cache-size:     64m
+        neg-cache-size:     32m
+        infra-cache-numhosts: 10000
+        so-rcvbuf:          4m
+        so-sndbuf:          4m
+        outgoing-range:     950
+        num-queries-per-thread:     450
+        so-reuseport:       yes
 
 forward-zone:
 	name: "."
