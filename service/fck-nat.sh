@@ -238,8 +238,9 @@ forward-zone:
 	name: "amazonaws.com"
         forward-addr: 169.254.169.253
 
+${unbound_extra}
 EOM
-
+  
   systemctl enable unbound
   systemctl start unbound
 fi
