@@ -57,8 +57,6 @@ else
     echo "No eni_id or interface configuration found, using default interface $nat_interface"
 fi
 
-#net_interface=$(ip link show | awk '/^[0-9]+: e/ {gsub(":",""); if($2 != "'$nat_interface'") {printf $2 " ";}} END { print ""; }' )
-
 cat << EOM | sysctl -q -p -
 net.netfilter.nf_conntrack_sctp_timeout_established=1800
 net.netfilter.nf_conntrack_udp_timeout=180
@@ -99,15 +97,10 @@ echo "Flushing NAT table..."
 iptables -t nat -F
 
 echo "Adding NAT rule..."
-iptables -t nat -A POSTROUTING -o "$nat_interface" -s 172.16.0.0/12 -j MASQUERADE -m comment --comment "NAT routing rule installed by fck-nat"
-iptables -t nat -A POSTROUTING -o "$nat_interface" -s 192.168.0.0/16 -j MASQUERADE -m comment --comment "NAT routing rule installed by fck-nat"
-iptables -t nat -A POSTROUTING -o "$nat_interface" -s 10.0.0.0/8 -j MASQUERADE -m comment --comment "NAT routing rule installed by fck-nat"
+iptables -t nat -A POSTROUTING -o "$nat_interface" -s 172.16.0.0/12,192.168.0.0/16,10.0.0.0/8 -j MASQUERADE -m comment --comment "NAT routing rule installed by fck-nat"
 
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-iptables -A INPUT -m state --state NEW -s 172.16.0.0/12 -j ACCEPT
-iptables -A INPUT -m state --state NEW -s 192.168.0.0/16 -j ACCEPT
-iptables -A INPUT -m state --state NEW -s 10.0.0.0/8 -j ACCEPT
-iptables -A INPUT -m state --state NEW -s 127.0.0.0/8 -j ACCEPT
+iptables -A INPUT -m state --state NEW -s 172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,127.0.0.0/8 -j ACCEPT
 iptables -P INPUT DROP
 
 for sship in ${allow_ssh}; do
@@ -136,20 +129,12 @@ if test -n "$allow_dns"; then
     awk '/nameserver/ { print "iptables -t nat -A PREROUTING -p tcp --dport 53 -d " $2 " -j ACCEPT"; }' /etc/resolv.conf | sh
 
     #Accept local forwards/redirects
-    iptables -t nat -A PREROUTING -p tcp --dport 53 -d 172.16.0.0/12 -j ACCEPT
-    iptables -t nat -A PREROUTING -p udp --dport 53 -d 172.16.0.0/12 -j ACCEPT
-    iptables -t nat -A PREROUTING -p tcp --dport 53 -d 10.0.0.0/8 -j ACCEPT
-    iptables -t nat -A PREROUTING -p udp --dport 53 -d 10.0.0.0/8 -j ACCEPT
-    iptables -t nat -A PREROUTING -p tcp --dport 53 -d 192.168.0.0/16 -j ACCEPT
-    iptables -t nat -A PREROUTING -p udp --dport 53 -d 192.168.0.0/16 -j ACCEPT
+    iptables -t nat -A PREROUTING -p tcp --dport 53 -d 172.16.0.0/12,10.0.0.0/8,192.168.0.0/16 -j ACCEPT
+    iptables -t nat -A PREROUTING -p udp --dport 53 -d 172.16.0.0/12,10.0.0.0/8,192.168.0.0/16 -j ACCEPT
 
     #Redirect from private ips to local unbound
-    iptables -t nat -A PREROUTING -p tcp --dport 53 -s 172.16.0.0/12 -j REDIRECT --to-port 53
-    iptables -t nat -A PREROUTING -p udp --dport 53 -s 172.16.0.0/12 -j REDIRECT --to-port 53
-    iptables -t nat -A PREROUTING -p tcp --dport 53 -s 10.0.0.0/8 -j REDIRECT --to-port 53
-    iptables -t nat -A PREROUTING -p udp --dport 53 -s 10.0.0.0/8 -j REDIRECT --to-port 53
-    iptables -t nat -A PREROUTING -p tcp --dport 53 -s 192.168.0.0/16 -j REDIRECT --to-port 53
-    iptables -t nat -A PREROUTING -p udp --dport 53 -s 192.168.0.0/16 -j REDIRECT --to-port 53
+    iptables -t nat -A PREROUTING -p tcp --dport 53 -s 172.16.0.0/12,10.0.0.0/8,192.168.0.0/16 -j REDIRECT --to-port 53
+    iptables -t nat -A PREROUTING -p udp --dport 53 -s 172.16.0.0/12,10.0.0.0/8,192.168.0.0/16 -j REDIRECT --to-port 53
   fi
   
   #curl -o /etc/unbound/root.hints https://www.internic.net/domain/named.root
