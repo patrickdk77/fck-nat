@@ -107,35 +107,13 @@ for sship in ${allow_ssh}; do
   iptables -A INPUT -m state --state NEW -s ${sship} -p tcp --dport 22 -j ACCEPT
 done
 
-if test -n "$allow_dns"; then
+if test -n "$redirect_dns"; then
   echo "Adding DNS redirect rules..."
-  if test -n "$eni_id"; then
-    iptables -A INPUT -m state --state NEW -i "!$nat_interface" -j ACCEPT
-    iptables -A FORWARD -i "$nat_interface" -o "$nat_interface" -j REJECT
+  # the -i !ens0 is not working on al2023
 
-    iptables -t nat -A PREROUTING -i "!$nat_interface" -p udp --dport 53 -j REDIRECT --to-port 53
-    iptables -t nat -A PREROUTING -i "!$nat_interface" -p tcp --dport 53 -j REDIRECT --to-port 53
-  else
-    #Access out DNS servers
-    iptables -t nat -A PREROUTING -p tcp --dport 53 -d 169.254.169.253/32 -j ACCEPT
-    iptables -t nat -A PREROUTING -p udp --dport 53 -d 169.254.169.253/32 -j ACCEPT
-    for dnsip in ${allow_dns}; do
-      iptables -t nat -A PREROUTING -p tcp --dport 53 -d ${dnsip} -j ACCEPT
-      iptables -t nat -A PREROUTING -p udp --dport 53 -d ${dnsip} -j ACCEPT
-    done
-
-    #Add resolv.conf servers
-    awk '/nameserver/ { print "iptables -t nat -A PREROUTING -p udp --dport 53 -d " $2 " -j ACCEPT"; }' /etc/resolv.conf | sh
-    awk '/nameserver/ { print "iptables -t nat -A PREROUTING -p tcp --dport 53 -d " $2 " -j ACCEPT"; }' /etc/resolv.conf | sh
-
-    #Accept local forwards/redirects
-    iptables -t nat -A PREROUTING -p tcp --dport 53 -d 172.16.0.0/12,10.0.0.0/8,192.168.0.0/16 -j ACCEPT
-    iptables -t nat -A PREROUTING -p udp --dport 53 -d 172.16.0.0/12,10.0.0.0/8,192.168.0.0/16 -j ACCEPT
-
-    #Redirect from private ips to local unbound
-    iptables -t nat -A PREROUTING -p tcp --dport 53 -s 172.16.0.0/12,10.0.0.0/8,192.168.0.0/16 -j REDIRECT --to-port 53
-    iptables -t nat -A PREROUTING -p udp --dport 53 -s 172.16.0.0/12,10.0.0.0/8,192.168.0.0/16 -j REDIRECT --to-port 53
-  fi
+  #Redirect from private ips to local unbound
+  iptables -t nat -A PREROUTING -p tcp --dport 53 -s 172.16.0.0/12,10.0.0.0/8,192.168.0.0/16 -j REDIRECT --to-port 53
+  iptables -t nat -A PREROUTING -p udp --dport 53 -s 172.16.0.0/12,10.0.0.0/8,192.168.0.0/16 -j REDIRECT --to-port 53
   
   #curl -o /etc/unbound/root.hints https://www.internic.net/domain/named.root
   cat << EOM > /etc/unbound/unbound.conf
@@ -145,7 +123,7 @@ server:
 	interface-automatic: yes
 	port: 53
 	#root-hints: "root.hints"
-	auto-trust-anchor-file: "/var/lib/unbound/root.key"
+	#auto-trust-anchor-file: "root.key"
 	access-control: 0.0.0.0/0 refuse
 	access-control: 127.0.0.0/8 allow_snoop
 	access-control: 10.0.0.0/8 allow_snoop
@@ -201,10 +179,14 @@ server:
         num-queries-per-thread:     450
         so-reuseport:       yes
 
+remote-control:
+	control-enable:     yes
+	control-interface:  /run/unbound/control
+
 forward-zone:
 	name: "."
 EOM
-  for dnsip in ${allow_dns}; do
+  for dnsip in ${redirect_dns}; do
     echo "        forward-addr: ${dnsip}" >> /etc/unbound/unbound.conf
   done
   cat << EOM >> /etc/unbound/unbound.conf
